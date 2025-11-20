@@ -3,7 +3,7 @@ builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "/init"
+startCommand = "/usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 10
 
