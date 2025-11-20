@@ -44,6 +44,7 @@ ARG CI=true
 
 WORKDIR /var/www/html
 
+# Switch to root temporarily for system package installation
 USER root
 
 # Install PostgreSQL repository and keys
@@ -62,11 +63,6 @@ RUN apk upgrade && \
     lsof \
     vim
 
-# Configure shell aliases
-RUN echo "alias ll='ls -al'" >> /etc/profile && \
-    echo "alias a='php artisan'" >> /etc/profile && \
-    echo "alias logs='tail -f storage/logs/laravel.log'" >> /etc/profile
-
 # Install Cloudflared based on architecture
 RUN mkdir -p /usr/local/bin && \
     if [ "${TARGETPLATFORM}" = "linux/amd64" ]; then \
@@ -75,6 +71,13 @@ RUN mkdir -p /usr/local/bin && \
     curl -sSL "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-arm64" -o /usr/local/bin/cloudflared; \
     fi && \
     chmod +x /usr/local/bin/cloudflared
+
+# Install MinIO client
+COPY --from=minio-client /usr/bin/mc /usr/bin/mc
+RUN chmod +x /usr/bin/mc
+
+# Switch back to www-data user (default for serversideup/php)
+USER www-data
 
 # Copy application files from previous stages
 COPY --from=base --chown=www-data:www-data /var/www/html/vendor ./vendor
@@ -97,17 +100,6 @@ COPY --chown=www-data:www-data openapi.yaml ./openapi.yaml
 COPY --chown=www-data:www-data changelogs/ ./changelogs/
 
 RUN composer dump-autoload
-
-# Install MinIO client
-COPY --from=minio-client /usr/bin/mc /usr/bin/mc
-RUN chmod +x /usr/bin/mc
-
-# Ensure storage permissions
-RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache && \
-    chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
-
-# Run database migrations on startup
-RUN php artisan config:cache || true
 
 # Expose port
 EXPOSE 80
