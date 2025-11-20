@@ -76,10 +76,7 @@ RUN mkdir -p /usr/local/bin && \
 COPY --from=minio-client /usr/bin/mc /usr/bin/mc
 RUN chmod +x /usr/bin/mc
 
-# Switch back to www-data user (default for serversideup/php)
-USER www-data
-
-# Copy application files from previous stages
+# Copy application files from previous stages (stay as root for s6-overlay)
 COPY --from=base --chown=www-data:www-data /var/www/html/vendor ./vendor
 COPY --from=static-assets --chown=www-data:www-data /app/public/build ./public/build
 
@@ -100,6 +97,10 @@ COPY --chown=www-data:www-data openapi.yaml ./openapi.yaml
 COPY --chown=www-data:www-data changelogs/ ./changelogs/
 
 RUN composer dump-autoload
+
+# Ensure storage permissions are correct
+RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache && \
+    chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
 
 # Expose port
 EXPOSE 80
