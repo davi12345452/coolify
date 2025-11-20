@@ -125,13 +125,10 @@ COPY --chown=www-data:www-data changelogs/ ./changelogs/
 RUN composer dump-autoload
 
 # Configure Nginx and S6 overlay
+RUN mkdir -p /etc/nginx/conf.d /etc/nginx/site-opts.d
 COPY docker/production/etc/nginx/conf.d/custom.conf /etc/nginx/conf.d/custom.conf
 COPY docker/production/etc/nginx/site-opts.d/http.conf /etc/nginx/site-opts.d/http.conf
 COPY --chmod=755 docker/production/etc/s6-overlay/ /etc/s6-overlay/
-
-RUN mkdir -p /etc/nginx/conf.d && \
-    chown -R www-data:www-data /etc/nginx && \
-    chmod -R 755 /etc/nginx
 
 # Install MinIO client
 COPY --from=minio-client /usr/bin/mc /usr/bin/mc
@@ -141,8 +138,8 @@ RUN chmod +x /usr/bin/mc
 RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache && \
     chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
 
-# Switch to non-root user
-USER www-data
+# Note: We stay as root user for the entrypoint to work correctly
+# The s6-overlay will handle dropping privileges for PHP-FPM
 
 # Expose port (Railway will provide PORT env var)
 EXPOSE 8080
