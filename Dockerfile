@@ -76,10 +76,6 @@ RUN mkdir -p /usr/local/bin && \
     fi && \
     chmod +x /usr/local/bin/cloudflared
 
-# Configure PHP
-COPY docker/production/etc/php/conf.d/zzz-custom-php.ini /usr/local/etc/php/conf.d/zzz-custom-php.ini
-ENV PHP_OPCACHE_ENABLE=1
-
 # Copy application files from previous stages
 COPY --from=base --chown=www-data:www-data /var/www/html/vendor ./vendor
 COPY --from=static-assets --chown=www-data:www-data /app/public/build ./public/build
@@ -102,13 +98,6 @@ COPY --chown=www-data:www-data changelogs/ ./changelogs/
 
 RUN composer dump-autoload
 
-# Configure Nginx
-RUN mkdir -p /etc/nginx/conf.d /etc/nginx/site-opts.d
-COPY docker/production/etc/nginx/conf.d/custom.conf /etc/nginx/conf.d/custom.conf
-COPY docker/production/etc/nginx/site-opts.d/http.conf /etc/nginx/site-opts.d/http.conf
-
-# Note: Not copying s6-overlay customizations to avoid conflicts with base image
-
 # Install MinIO client
 COPY --from=minio-client /usr/bin/mc /usr/bin/mc
 RUN chmod +x /usr/bin/mc
@@ -117,12 +106,12 @@ RUN chmod +x /usr/bin/mc
 RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache && \
     chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
 
-# Note: We stay as root user for the entrypoint to work correctly
-# The s6-overlay will handle dropping privileges for PHP-FPM
+# Run database migrations on startup
+RUN php artisan config:cache || true
 
-# Expose port (Railway will provide PORT env var)
-EXPOSE 8080
+# Expose port
+EXPOSE 80
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8080/healthcheck || exit 1
+    CMD curl -f http://localhost:80/ || exit 1

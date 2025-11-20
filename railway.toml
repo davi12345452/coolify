@@ -8,7 +8,7 @@ restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 10
 
 # Health check configuration
-healthcheckPath = "/healthcheck"
+healthcheckPath = "/"
 healthcheckTimeout = 300
 
 [env]
