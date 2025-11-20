@@ -80,9 +80,6 @@ RUN mkdir -p /usr/local/bin && \
 COPY docker/production/etc/php/conf.d/zzz-custom-php.ini /usr/local/etc/php/conf.d/zzz-custom-php.ini
 ENV PHP_OPCACHE_ENABLE=1
 
-# Configure entrypoint
-COPY --chmod=755 docker/production/entrypoint.d/ /etc/entrypoint.d
-
 # Copy application files from previous stages
 COPY --from=base --chown=www-data:www-data /var/www/html/vendor ./vendor
 COPY --from=static-assets --chown=www-data:www-data /app/public/build ./public/build
@@ -105,11 +102,12 @@ COPY --chown=www-data:www-data changelogs/ ./changelogs/
 
 RUN composer dump-autoload
 
-# Configure Nginx and S6 overlay
+# Configure Nginx
 RUN mkdir -p /etc/nginx/conf.d /etc/nginx/site-opts.d
 COPY docker/production/etc/nginx/conf.d/custom.conf /etc/nginx/conf.d/custom.conf
 COPY docker/production/etc/nginx/site-opts.d/http.conf /etc/nginx/site-opts.d/http.conf
-COPY --chmod=755 docker/production/etc/s6-overlay/ /etc/s6-overlay/
+
+# Note: Not copying s6-overlay customizations to avoid conflicts with base image
 
 # Install MinIO client
 COPY --from=minio-client /usr/bin/mc /usr/bin/mc
