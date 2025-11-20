@@ -1,0 +1,16 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "/init"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10
+
+# Health check configuration
+healthcheckPath = "/healthcheck"
+healthcheckTimeout = 300
+
+[env]
+# Railway will automatically provide DATABASE_URL for PostgreSQL
+# Railway will automatically provide REDIS_URL for Redis
