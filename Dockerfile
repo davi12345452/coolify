@@ -36,8 +36,11 @@ RUN apk add --no-cache \
     unzip \
     supervisor
 
-# Install PHP extensions
-RUN docker-php-ext-install pdo pdo_pgsql pcntl
+# Install PHP extensions (need postgresql-dev for pdo_pgsql build)
+RUN apk add --no-cache --virtual .build-deps \
+    postgresql-dev \
+    && docker-php-ext-install pdo pdo_pgsql pcntl \
+    && apk del .build-deps
 
 # Install Redis extension
 RUN apk add --no-cache $PHPIZE_DEPS \
