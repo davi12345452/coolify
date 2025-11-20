@@ -1,25 +1,19 @@
-# Dockerfile for Railway deployment
-# This is a simplified version of docker/production/Dockerfile optimized for Railway
-
-# Versions
-ARG SERVERSIDEUP_PHP_VERSION=8.4-fpm-nginx-alpine
-ARG MINIO_VERSION=RELEASE.2025-05-21T01-59-54Z
-ARG CLOUDFLARED_VERSION=2025.7.0
-ARG POSTGRES_VERSION=15
+# Simplified Dockerfile for Railway using official PHP image
+# Based on standard PHP-FPM + Nginx setup
 
 # =================================================================
 # Stage 1: Composer dependencies
 # =================================================================
-FROM serversideup/php:${SERVERSIDEUP_PHP_VERSION} AS base
+FROM composer:2 AS composer
 
-WORKDIR /var/www/html
+WORKDIR /app
 COPY composer.json composer.lock ./
-RUN composer install --no-dev --no-interaction --no-plugins --no-scripts --prefer-dist
+RUN composer install --no-dev --no-interaction --no-scripts --prefer-dist --optimize-autoloader
 
 # =================================================================
-# Stage 2: Frontend assets compilation
+# Stage 2: Frontend assets
 # =================================================================
-FROM node:24-alpine AS static-assets
+FROM node:24-alpine AS frontend
 
 WORKDIR /app
 COPY package*.json vite.config.js postcss.config.cjs ./
@@ -28,83 +22,56 @@ COPY . .
 RUN npm run build
 
 # =================================================================
-# Stage 3: Get MinIO client
+# Final Stage: PHP + Nginx
 # =================================================================
-FROM minio/mc:${MINIO_VERSION} AS minio-client
-
-# =================================================================
-# Final Stage: Production image
-# =================================================================
-FROM serversideup/php:${SERVERSIDEUP_PHP_VERSION}
-
-ARG TARGETPLATFORM
-ARG POSTGRES_VERSION
-ARG CLOUDFLARED_VERSION
-ARG CI=true
-
-WORKDIR /var/www/html
-
-# Switch to root temporarily for system package installation
-USER root
-
-# Install PostgreSQL repository and keys
-RUN apk add --no-cache gnupg && \
-    mkdir -p /usr/share/keyrings && \
-    curl -fSsL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor > /usr/share/keyrings/postgresql.gpg
+FROM php:8.4-fpm-alpine
 
 # Install system dependencies
-RUN apk upgrade && \
-    apk add --no-cache \
-    postgresql${POSTGRES_VERSION}-client \
-    openssh-client \
+RUN apk add --no-cache \
+    nginx \
+    postgresql15-client \
     git \
-    git-lfs \
-    jq \
-    lsof \
-    vim
+    curl \
+    zip \
+    unzip \
+    supervisor
 
-# Install Cloudflared based on architecture
-RUN mkdir -p /usr/local/bin && \
-    if [ "${TARGETPLATFORM}" = "linux/amd64" ]; then \
-    curl -sSL "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64" -o /usr/local/bin/cloudflared; \
-    elif [ "${TARGETPLATFORM}" = "linux/arm64" ]; then \
-    curl -sSL "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-arm64" -o /usr/local/bin/cloudflared; \
-    fi && \
-    chmod +x /usr/local/bin/cloudflared
+# Install PHP extensions
+RUN docker-php-ext-install pdo pdo_pgsql pcntl
 
-# Install MinIO client
-COPY --from=minio-client /usr/bin/mc /usr/bin/mc
-RUN chmod +x /usr/bin/mc
+# Install Redis extension
+RUN apk add --no-cache $PHPIZE_DEPS \
+    && pecl install redis \
+    && docker-php-ext-enable redis \
+    && apk del $PHPIZE_DEPS
 
-# Copy application files from previous stages (stay as root for s6-overlay)
-COPY --from=base --chown=www-data:www-data /var/www/html/vendor ./vendor
-COPY --from=static-assets --chown=www-data:www-data /app/public/build ./public/build
+# Copy application
+WORKDIR /var/www/html
+COPY --chown=www-data:www-data . .
+COPY --from=composer --chown=www-data:www-data /app/vendor ./vendor
+COPY --from=frontend --chown=www-data:www-data /app/public/build ./public/build
 
-# Copy application source code
-COPY --chown=www-data:www-data composer.json composer.lock ./
-COPY --chown=www-data:www-data app ./app
-COPY --chown=www-data:www-data bootstrap ./bootstrap
-COPY --chown=www-data:www-data config ./config
-COPY --chown=www-data:www-data database ./database
-COPY --chown=www-data:www-data lang ./lang
-COPY --chown=www-data:www-data public ./public
-COPY --chown=www-data:www-data routes ./routes
-COPY --chown=www-data:www-data storage ./storage
-COPY --chown=www-data:www-data templates ./templates
-COPY --chown=www-data:www-data resources/views ./resources/views
-COPY --chown=www-data:www-data artisan artisan
-COPY --chown=www-data:www-data openapi.yaml ./openapi.yaml
-COPY --chown=www-data:www-data changelogs/ ./changelogs/
+# Configure PHP-FPM
+RUN echo "pm = dynamic" > /usr/local/etc/php-fpm.d/zz-custom.conf \
+    && echo "pm.max_children = 20" >> /usr/local/etc/php-fpm.d/zz-custom.conf \
+    && echo "pm.start_servers = 2" >> /usr/local/etc/php-fpm.d/zz-custom.conf \
+    && echo "pm.min_spare_servers = 1" >> /usr/local/etc/php-fpm.d/zz-custom.conf \
+    && echo "pm.max_spare_servers = 3" >> /usr/local/etc/php-fpm.d/zz-custom.conf
 
-RUN composer dump-autoload
+# Configure Nginx
+RUN mkdir -p /run/nginx
+COPY docker/railway/nginx.conf /etc/nginx/nginx.conf
 
-# Ensure storage permissions are correct
-RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache && \
-    chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
+# Configure Supervisor to manage both services
+COPY docker/railway/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-# Expose port
+# Set permissions
+RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache \
+    && chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
+
+# Laravel optimization (skip for now to avoid .env issues)
+RUN php artisan config:clear || true
+
 EXPOSE 80
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:80/ || exit 1
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/services.conf"]
